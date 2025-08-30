@@ -13,8 +13,9 @@ const app = express()
 const corsOptions = {
   origin: function (origin, callback) {
     const allowedOrigins = [
-      process.env.FRONTEND_URL,
-      'http://localhost:3000' // For local development
+      'https://daily-task-frontend-gamma.vercel.app',  // Production frontend
+      'http://localhost:3000',                         // Local development
+      'https://daily-task-backend-eight.vercel.app'    // Backend URL
     ]
     
     // Allow requests with no origin (like mobile apps or curl requests)
