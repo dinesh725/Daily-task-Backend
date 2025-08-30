@@ -120,17 +120,20 @@ const transporter = nodemailer.createTransport({
 })
 
 // JWT Middleware
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers["authorization"]
-  const token = authHeader && authHeader.split(" ")[1]
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization']
+  const token = authHeader && authHeader.split(' ')[1]
 
-  if (!token) {
-    return res.status(401).json({ error: "Access token required" })
+  if (token == null) {
+    // Let routes handle unauthenticated users, don't block here
+    // This allows for public routes or routes with optional authentication
+    return next();
   }
 
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
     if (err) {
-      return res.status(403).json({ error: "Invalid token" })
+      // If token is invalid (e.g., expired), treat as unauthenticated
+      return next(); 
     }
     req.user = user
     next()
