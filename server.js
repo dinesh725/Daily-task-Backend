@@ -15,7 +15,6 @@ const corsOptions = {
     const allowedOrigins = [
       'https://daily-task-frontend-gamma.vercel.app',  // Production frontend
       'http://localhost:3000',                         // Local development
-      'https://daily-task-backend-eight.vercel.app'    // Backend URL
     ]
     
     // Allow requests with no origin (like mobile apps or curl requests)
