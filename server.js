@@ -329,11 +329,30 @@ app.post("/api/tasks/:date", authenticateToken, async (req, res) => {
     const userId = req.user.userId
     const { tasks, summary } = req.body
 
-    await Task.findOneAndUpdate({ userId, date }, { tasks, summary }, { upsert: true, new: true })
+    console.log('Saving tasks for user:', userId, 'date:', date)
+    console.log('Tasks data:', JSON.stringify(tasks, null, 2))
+    console.log('Summary:', JSON.stringify(summary, null, 2))
 
+    if (!mongoose.connection.readyState) {
+      console.error('MongoDB not connected')
+      return res.status(500).json({ error: 'Database not connected' })
+    }
+
+    const result = await Task.findOneAndUpdate(
+      { userId, date },
+      { userId, date, tasks, summary },
+      { upsert: true, new: true, runValidators: true }
+    )
+    
+    console.log('Save result:', result ? 'Success' : 'No document modified')
     res.json({ message: "Tasks saved successfully" })
   } catch (error) {
-    res.status(500).json({ error: "Server error" })
+    console.error('Error saving tasks:', error)
+    res.status(500).json({ 
+      error: "Failed to save tasks",
+      message: error.message,
+      ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+    })
   }
 })
 
