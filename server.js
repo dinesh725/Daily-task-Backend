@@ -324,35 +324,65 @@ app.get("/api/tasks/:date", authenticateToken, async (req, res) => {
 
 // Save Tasks
 app.post("/api/tasks/:date", authenticateToken, async (req, res) => {
+  const { date } = req.params;
+  const userId = req.user?.userId;
+  const { tasks, summary } = req.body;
+
+  // Basic validation
+  if (!userId) {
+    console.error('No user ID in request');
+    return res.status(400).json({ error: 'Invalid user' });
+  }
+
+  if (!tasks || !Array.isArray(tasks)) {
+    console.error('Invalid tasks data');
+    return res.status(400).json({ error: 'Invalid tasks data' });
+  }
+
   try {
-    const { date } = req.params
-    const userId = req.user.userId
-    const { tasks, summary } = req.body
-
-    console.log('Saving tasks for user:', userId, 'date:', date)
-    console.log('Tasks data:', JSON.stringify(tasks, null, 2))
-    console.log('Summary:', JSON.stringify(summary, null, 2))
-
-    if (!mongoose.connection.readyState) {
-      console.error('MongoDB not connected')
-      return res.status(500).json({ error: 'Database not connected' })
+    // Check MongoDB connection
+    if (mongoose.connection.readyState !== 1) {
+      console.error('MongoDB connection not ready');
+      throw new Error('Database not available');
     }
 
     const result = await Task.findOneAndUpdate(
       { userId, date },
       { userId, date, tasks, summary },
-      { upsert: true, new: true, runValidators: true }
-    )
+      { 
+        upsert: true, 
+        new: true, 
+        runValidators: true,
+        setDefaultsOnInsert: true
+      }
+    );
     
-    console.log('Save result:', result ? 'Success' : 'No document modified')
-    res.json({ message: "Tasks saved successfully" })
+    if (!result) {
+      console.error('No result from database operation');
+      throw new Error('Failed to save tasks');
+    }
+
+    res.json({ message: "Tasks saved successfully" });
   } catch (error) {
-    console.error('Error saving tasks:', error)
+    console.error('Error in /api/tasks:', {
+      error: error.message,
+      name: error.name,
+      stack: error.stack,
+      userId,
+      date,
+      taskCount: tasks?.length,
+      hasSummary: !!summary
+    });
+
+    // Don't expose internal errors in production
+    const errorMessage = process.env.NODE_ENV === 'production'
+      ? 'Failed to save tasks. Please try again.'
+      : error.message;
+
     res.status(500).json({ 
-      error: "Failed to save tasks",
-      message: error.message,
-      ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
-    })
+      error: errorMessage,
+      ...(process.env.NODE_ENV !== 'production' && { details: error.message })
+    });
   }
 })
 
