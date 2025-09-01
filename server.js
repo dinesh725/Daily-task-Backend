@@ -191,56 +191,34 @@ app.post("/api/register", async (req, res) => {
 // Login
 app.post("/api/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
-
-    // Input validation
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required" });
-    }
+    const { email, password } = req.body
 
     // Find user
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email })
     if (!user) {
-      console.log('Login failed: User not found', { email });
-      return res.status(401).json({ error: "Invalid email or password" });
+      return res.status(400).json({ error: "Invalid credentials" })
     }
 
     // Check password
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      console.log('Login failed: Invalid password', { email });
-      return res.status(401).json({ error: "Invalid email or password" });
+    const isMatch = await bcrypt.compare(password, user.password)
+    if (!isMatch) {
+      return res.status(400).json({ error: "Invalid credentials" })
     }
 
-    // Generate JWT token
-    const token = jwt.sign(
-      { 
-        userId: user._id.toString(),
-        email: user.email 
-      }, 
-      process.env.JWT_SECRET, 
-      { expiresIn: '24h' }
-    );
+    // Generate token
+    const token = jwt.sign({ userId: user._id, email: user.email }, process.env.JWT_SECRET, { expiresIn: "24h" })
 
-    console.log('Login successful', { userId: user._id, email: user.email });
-
-    // Return user data and token
     res.json({
+      message: "Login successful",
       token,
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
-        createdAt: user.createdAt
-      }
-    });
-
+      },
+    })
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ 
-      error: "An error occurred during login",
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    res.status(500).json({ error: "Server error" })
   }
 })
 
