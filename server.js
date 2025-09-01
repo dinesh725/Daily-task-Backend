@@ -288,58 +288,138 @@ app.post("/api/reset-password", async (req, res) => {
 })
 
 // Get Tasks
+// Get Tasks for a specific date
 app.get("/api/tasks/:date", authenticateToken, async (req, res) => {
-  try {
-    console.log("Save tasks request received:", {
-      date: req.params.date,
-      userId: req.user.userId,
-      body: req.body
-    });
-    
-    const { date } = req.params
-    const userId = req.user.userId
-    const { tasks, summary } = req.body
+  const { date } = req.params;
+  const userId = req.user?.userId;
 
-    if (!tasks || !Array.isArray(tasks)) {
-      console.error("Invalid tasks data:", tasks);
-      return res.status(400).json({ error: "Invalid tasks data" });
+  // Validate date format (YYYY-MM-DD)
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(date)) {
+    console.error('Invalid date format:', date);
+    return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+  }
+
+  if (!userId) {
+    console.error('No user ID in request');
+    return res.status(400).json({ error: 'Invalid user' });
+  }
+
+  try {
+    console.log('Fetching tasks for:', { userId, date });
+    
+    // Check MongoDB connection
+    if (mongoose.connection.readyState !== 1) {
+      console.error('MongoDB connection not ready');
+      throw new Error('Database not available');
     }
 
-    const result = await Task.findOneAndUpdate(
-      { userId, date }, 
-      { tasks, summary }, 
-      { upsert: true, new: true }
-    );
+    const tasks = await Task.findOne({ userId, date });
     
-    console.log("Save successful:", result ? "Task updated" : "No task found");
-    res.json({ message: "Tasks saved successfully" });
+    if (!tasks) {
+      console.log('No tasks found for date:', date);
+      return res.status(404).json({ 
+        message: 'No tasks found for this date',
+        tasks: []
+      });
+    }
+
+    // Ensure tasks.tasks is an array
+    const taskList = Array.isArray(tasks.tasks) ? tasks.tasks : [];
+    
+    // Ensure each task has required fields
+    const validatedTasks = taskList.map(task => ({
+      id: task.id || `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      startTime: task.startTime || '',
+      endTime: task.endTime || '',
+      planTask: task.planTask || '',
+      actualTask: task.actualTask || '',
+      category: task.category || 'Default',
+      duration: typeof task.duration === 'number' ? task.duration : 0
+    }));
+
+    console.log(`Found ${validatedTasks.length} tasks for date:`, date);
+    
+    res.json({
+      tasks: validatedTasks,
+      summary: tasks.summary || {
+        totalPlannedTime: 0,
+        totalActualTime: 0,
+        efficiency: 0,
+        categories: {}
+      }
+    });
+    
   } catch (error) {
-    console.error("Error saving tasks:", error);
+    console.error('Error fetching tasks:', {
+      error: error.message,
+      name: error.name,
+      stack: error.stack,
+      userId,
+      date
+    });
+
+    // Don't expose internal errors in production
+    const errorMessage = process.env.NODE_ENV === 'production'
+      ? 'Failed to fetch tasks. Please try again.'
+      : error.message;
+
     res.status(500).json({ 
-      error: "Server error",
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: errorMessage,
+      ...(process.env.NODE_ENV !== 'production' && { details: error.message })
     });
   }
-})
+});
 
+// {{ ... }}
 // Save Tasks
 app.post("/api/tasks/:date", authenticateToken, async (req, res) => {
   const { date } = req.params;
   const userId = req.user?.userId;
   const { tasks, summary } = req.body;
 
-  // Basic validation
+  // Validate date format (YYYY-MM-DD)
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(date)) {
+    console.error('Invalid date format:', date);
+    return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+  }
+
+  // Validate required fields
   if (!userId) {
     console.error('No user ID in request');
     return res.status(400).json({ error: 'Invalid user' });
   }
 
   if (!tasks || !Array.isArray(tasks)) {
-    console.error('Invalid tasks data');
-    return res.status(400).json({ error: 'Invalid tasks data' });
+    console.error('Invalid tasks data:', { tasks });
+    return res.status(400).json({ error: 'Tasks must be an array' });
+  }
+
+  // Validate task structure
+  for (const [index, task] of tasks.entries()) {
+    if (!task.id || typeof task.id !== 'string') {
+      console.error('Invalid task ID at index', index, ':', task);
+      return res.status(400).json({ 
+        error: `Task at index ${index} is missing a valid ID`,
+        taskIndex: index,
+        task
+      });
+    }
+    
+    // Add more validations as needed for other fields
   }
 
   try {
+    // Log the incoming data for debugging
+    console.log('Saving tasks:', {
+      userId,
+      date,
+      taskCount: tasks.length,
+      hasSummary: !!summary,
+      firstTask: tasks[0] // Log first task for debugging
+    });
+
     // Check MongoDB connection
     if (mongoose.connection.readyState !== 1) {
       console.error('MongoDB connection not ready');
@@ -348,7 +428,25 @@ app.post("/api/tasks/:date", authenticateToken, async (req, res) => {
 
     const result = await Task.findOneAndUpdate(
       { userId, date },
-      { userId, date, tasks, summary },
+      { 
+        userId,
+        date,
+        tasks: tasks.map(task => ({
+          id: task.id,
+          startTime: task.startTime || '',
+          endTime: task.endTime || '',
+          planTask: task.planTask || '',
+          actualTask: task.actualTask || '',
+          category: task.category || 'Default',
+          duration: typeof task.duration === 'number' ? task.duration : 0
+        })),
+        summary: {
+          totalPlannedTime: summary?.totalPlannedTime || 0,
+          totalActualTime: summary?.totalActualTime || 0,
+          efficiency: summary?.efficiency || 0,
+          categories: summary?.categories || {}
+        }
+      },
       { 
         upsert: true, 
         new: true, 
@@ -362,6 +460,7 @@ app.post("/api/tasks/:date", authenticateToken, async (req, res) => {
       throw new Error('Failed to save tasks');
     }
 
+    console.log('Successfully saved tasks for user:', userId);
     res.json({ message: "Tasks saved successfully" });
   } catch (error) {
     console.error('Error in /api/tasks:', {
@@ -374,6 +473,18 @@ app.post("/api/tasks/:date", authenticateToken, async (req, res) => {
       hasSummary: !!summary
     });
 
+    // More specific error handling
+    if (error.name === 'ValidationError') {
+      const errors = {};
+      Object.keys(error.errors).forEach(key => {
+        errors[key] = error.errors[key].message;
+      });
+      return res.status(400).json({ 
+        error: 'Validation failed',
+        details: errors 
+      });
+    }
+
     // Don't expose internal errors in production
     const errorMessage = process.env.NODE_ENV === 'production'
       ? 'Failed to save tasks. Please try again.'
@@ -384,8 +495,7 @@ app.post("/api/tasks/:date", authenticateToken, async (req, res) => {
       ...(process.env.NODE_ENV !== 'production' && { details: error.message })
     });
   }
-})
-
+});
 // Health check
 app.get("/api/health", (req, res) => {
   res.json({ status: "OK", timestamp: new Date().toISOString() })
