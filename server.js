@@ -42,14 +42,34 @@ app.options('*', cors(corsOptions))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 
-// MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI, {
+// MongoDB connection helper with caching for serverless
+const mongoOptions = {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-})
-.then(() => console.log("✅ MongoDB connected"))
-.catch(err => console.error("❌ MongoDB connection error:", err));
+  serverSelectionTimeoutMS: 10000,
+  socketTimeoutMS: 45000,
+  maxPoolSize: 5,
+};
 
+let mongoPromise = null;
+async function ensureDb() {
+  // 1 = connected, 2 = connecting
+  if (mongoose.connection.readyState === 1) return;
+  if (!mongoPromise) {
+    console.log('Connecting to MongoDB...');
+    mongoPromise = mongoose.connect(process.env.MONGODB_URI, mongoOptions)
+      .then((m) => {
+        console.log('✅ MongoDB connected');
+        return m;
+      })
+      .catch((err) => {
+        console.error('❌ MongoDB connection error:', err);
+        mongoPromise = null;
+        throw err;
+      });
+  }
+  await mongoPromise;
+}
 
 // User Schema
 const userSchema = new mongoose.Schema({
@@ -144,6 +164,7 @@ function authenticateToken(req, res, next) {
 // Register
 app.post("/api/register", async (req, res) => {
   try {
+    await ensureDb();
     const { name, email, password } = req.body
 
     // Check if user exists
@@ -191,6 +212,7 @@ app.post("/api/register", async (req, res) => {
 // Login
 app.post("/api/login", async (req, res) => {
   try {
+    await ensureDb();
     const { email, password } = req.body
 
     // Find user
@@ -225,6 +247,7 @@ app.post("/api/login", async (req, res) => {
 // Forgot Password
 app.post("/api/forgot-password", async (req, res) => {
   try {
+    await ensureDb();
     const { email } = req.body
 
     // Check if user exists
@@ -264,6 +287,7 @@ app.post("/api/forgot-password", async (req, res) => {
 // Reset Password
 app.post("/api/reset-password", async (req, res) => {
   try {
+    await ensureDb();
     const { email, otp, newPassword } = req.body
 
     // Verify OTP
@@ -287,6 +311,7 @@ app.post("/api/reset-password", async (req, res) => {
   }
 })
 // {{ ... }}
+// {{ ... }}
 // Get Tasks for a specific date
 app.get("/api/tasks/:date", authenticateToken, async (req, res) => {
   const { date } = req.params;
@@ -305,14 +330,9 @@ app.get("/api/tasks/:date", authenticateToken, async (req, res) => {
   }
 
   try {
+    await ensureDb();
     console.log('Fetching tasks for:', { userId, date });
     
-    // Check MongoDB connection
-    if (mongoose.connection.readyState !== 1) {
-      console.error('MongoDB connection not ready');
-      throw new Error('Database not available');
-    }
-
     const tasks = await Task.findOne({ userId, date });
     
     if (!tasks) {
@@ -396,6 +416,7 @@ app.post("/api/tasks/:date", authenticateToken, async (req, res) => {
   }
 
   try {
+    await ensureDb();
     console.log('Saving tasks:', {
       userId,
       date,
@@ -414,12 +435,6 @@ app.post("/api/tasks/:date", authenticateToken, async (req, res) => {
       category: task.category || 'Default',
       duration: typeof task.duration === 'number' ? task.duration : 0
     }));
-
-    // Check MongoDB connection
-    if (mongoose.connection.readyState !== 1) {
-      console.error('MongoDB connection not ready');
-      throw new Error('Database not available');
-    }
 
     const result = await Task.findOneAndUpdate(
       { userId, date },
@@ -486,7 +501,12 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "OK", timestamp: new Date().toISOString() })
 })
 
-const PORT = process.env.PORT || 5000
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`)
-})
+// Export app for Vercel serverless; run locally otherwise
+if (process.env.VERCEL) {
+  module.exports = app;
+} else {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
